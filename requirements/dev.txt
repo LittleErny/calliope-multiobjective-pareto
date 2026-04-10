@@ -1,4 +1,4 @@
-glpk == 5.0
+#glpk == 5.0
 jsonschema2md >= 1
 mkdocs >= 1.5
 mkdocs-click >= 0.6

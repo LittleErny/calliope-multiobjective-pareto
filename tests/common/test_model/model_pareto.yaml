@@ -1,0 +1,75 @@
+config:
+  init:
+    name: Pareto mode test model
+    calliope_version: 0.7.0
+    mode: pareto
+    subset:
+      timesteps:
+        - "2005-01-01 00:00:00"
+        - "2005-01-01 01:00:00"
+  build:
+    ensure_feasibility: true
+  solve:
+    solver: glpk
+    pareto:
+      method: epsilon
+      primary_cost: monetary
+      secondary_cost: emissions
+      epsilons: [1000000, 100000000, 10000000000]
+
+data_definitions:
+  objective_cost_weights:
+    data: [1, 0]
+    index: [monetary, emissions]
+    dims: costs
+  cost_interest_rate:
+    data: 0.0
+    index: monetary
+    dims: costs
+  bigM: 1e6
+
+techs:
+  demand_elec:
+    base_tech: demand
+    carrier_in: electricity
+
+  cheap_dirty:
+    base_tech: supply
+    carrier_out: electricity
+    source_use_max: .inf
+    flow_cap_max: 1000
+    cost_source_use:
+      data: [1.0, 10.0]
+      index: [monetary, emissions]
+      dims: costs
+
+  expensive_clean:
+    base_tech: supply
+    carrier_out: electricity
+    source_use_max: .inf
+    flow_cap_max: 1000
+    cost_source_use:
+      data: [3.0, 1.0]
+      index: [monetary, emissions]
+      dims: costs
+
+nodes:
+  a:
+    techs:
+      demand_elec:
+      cheap_dirty:
+      expensive_clean:
+  b:
+    techs:
+      demand_elec:
+      cheap_dirty:
+      expensive_clean:
+
+data_tables:
+  demand:
+    table: data_tables/demand_pareto.csv
+    rows: timesteps
+    columns: [nodes]
+    add_dims:
+      inputs: sink_use_equals
+      techs: demand_elec

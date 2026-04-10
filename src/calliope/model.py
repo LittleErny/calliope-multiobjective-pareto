@@ -360,6 +360,8 @@ class Model(ModelStructure):
         )
         if mode == "operate":
             results = self._solve_operate(self.config.solve)
+        elif mode == "pareto":
+            results = self._solve_pareto(self.config.solve)
         elif mode == "spores":
             results = self._solve_spores(self.config.solve)
         else:
@@ -597,6 +599,166 @@ class Model(ModelStructure):
             lambda x: x > 0
         )
         return new_initial_storage
+
+    def _solve_pareto(self, solve_config: config_schema.Solve) -> xr.Dataset:
+        """Solve in Pareto (epsilon-constraint) mode.
+
+        Minimises a primary cost class while constraining a secondary cost class to a sequence of epsilon values.
+        The constraint is implemented in `calliope.math.pareto`.
+        """
+        pareto_cfg = solve_config.pareto
+
+        if pareto_cfg.method != "epsilon":
+            raise exceptions.ModelError(
+                f"Pareto solve method '{pareto_cfg.method}' is not supported. Use method='epsilon'."
+            )
+        if not pareto_cfg.epsilons:
+            raise exceptions.ModelError(
+                "Pareto mode requires a non-empty list of epsilons (config.solve.pareto.epsilons)."
+            )
+
+        # Validate requested cost class names
+        if "costs" not in self.inputs.dims:
+            raise exceptions.ModelError(
+                "Pareto mode requires a 'costs' dimension in the model inputs (define at least one cost class)."
+            )
+        costs = list(self.inputs.coords["costs"].values)
+        if pareto_cfg.primary_cost not in costs:
+            raise exceptions.ModelError(
+                f"Primary cost '{pareto_cfg.primary_cost}' not found in costs={costs}."
+            )
+        if pareto_cfg.secondary_cost not in costs:
+            raise exceptions.ModelError(
+                f"Secondary cost '{pareto_cfg.secondary_cost}' not found in costs={costs}."
+            )
+
+        # Build one-hot weights for the objective (primary) and epsilon constraint (secondary)
+        primary_weights = xr.DataArray(
+            [1.0 if c == pareto_cfg.primary_cost else 0.0 for c in costs],
+            coords={"costs": costs},
+            dims=("costs",),
+        )
+        secondary_weights = xr.DataArray(
+            [1.0 if c == pareto_cfg.secondary_cost else 0.0 for c in costs],
+            coords={"costs": costs},
+            dims=("costs",),
+        )
+
+        # If continuing from existing results, skip epsilons already present
+        solved_eps = set()
+        if pareto_cfg.use_latest_results and self._is_solved and "pareto" in self.results.dims:
+            solved_eps = set([float(e) for e in self.results.coords["pareto"].values])
+
+        epsilons = [float(e) for e in pareto_cfg.epsilons]
+        results_list: list[xr.Dataset] = []
+        pareto_points: list[float] = []
+
+        for eps in epsilons:
+            if eps in solved_eps:
+                LOGGER.info(f"Pareto | skipping eps={eps} (already solved).")
+                continue
+
+            LOGGER.info(
+                f"Pareto | solving with primary='{pareto_cfg.primary_cost}', secondary='{pareto_cfg.secondary_cost}', eps={eps}."
+            )
+
+            # Set objective weights to primary-only, set constraint selection & epsilon
+            self.backend.update_input("objective_cost_weights", primary_weights)
+            self.backend.update_input("pareto_secondary_cost_weights", secondary_weights)
+            self.backend.update_input("pareto_epsilon", xr.DataArray(eps))
+            self.backend.set_objective("min_cost_optimisation")
+
+            res = self.backend._solve(solve_config, warmstart=False)
+
+            term = res.attrs.get("termination_condition")
+            is_ok = term in ["optimal", "feasible"]
+
+            # Save per-point results only if they are usable (the save function also checks this)
+            self._pareto_save_model(res, pareto_cfg, eps)
+
+            # SPORES-style behaviour: stop iterating once infeasible/non-optimal
+            if (not res) or (not is_ok):
+                exceptions.warn(
+                    f"Stopping Pareto run after eps={eps} due to non-optimal termination "
+                    f"(termination_condition={term})."
+                )
+                if pareto_cfg.stop_on_infeasible:
+                    break
+                continue
+
+            results_list.append(res)
+            pareto_points.append(eps)
+
+        if not results_list:
+            raise exceptions.ModelError("Pareto mode did not run any new solves (all epsilons were skipped).")
+
+        new_results = xr.concat(
+            results_list,
+            dim=pd.Index(pareto_points, name="pareto"),
+            combine_attrs="drop",
+        )
+
+        # Merge with any existing pareto results
+        if pareto_cfg.use_latest_results and self._is_solved and "pareto" in self.results.dims:
+            results = xr.concat(
+                [self.results, new_results],
+                dim="pareto",
+                combine_attrs="no_conflicts",
+            )
+            results = results.sortby("pareto")
+
+            # Drop any duplicate pareto points (e.g., float representation differences)
+            pareto_index = results.get_index("pareto")
+            if pareto_index.has_duplicates:
+                results = results.isel(pareto=~pareto_index.duplicated())
+        else:
+            results = new_results
+
+        # Track overall termination condition(s)
+        conds = sorted(
+            set(
+                r.attrs.get("termination_condition")
+                for r in results_list
+                if r.attrs.get("termination_condition") is not None
+            )
+        )
+        results.attrs["termination_condition"] = ",".join(conds)
+        results.attrs["pareto_method"] = pareto_cfg.method
+        results.attrs["pareto_primary_cost"] = pareto_cfg.primary_cost
+        results.attrs["pareto_secondary_cost"] = pareto_cfg.secondary_cost
+        results.attrs["pareto_stop_on_infeasible"] = pareto_cfg.stop_on_infeasible
+        results.attrs["pareto_epsilons_requested"] = ",".join([str(float(e)) for e in pareto_cfg.epsilons])
+        
+        # Pareto metadata
+        results.attrs["pareto_primary_cost"] = pareto_cfg.primary_cost
+        results.attrs["pareto_secondary_cost"] = pareto_cfg.secondary_cost
+
+        return results
+
+    
+    def _pareto_save_model(
+        self, results: xr.Dataset, pareto_config: config_schema.SolvePareto, eps: float
+    ) -> None:
+        """Save results per Pareto point.
+
+        Mirrors `spores` behaviour: save only on optimal/feasible termination.
+        """
+        if pareto_config.save_per_point_path is None:
+            return None
+
+        if results.attrs.get("termination_condition") in ["optimal", "feasible"]:
+            pareto_config.save_per_point_path.mkdir(parents=True, exist_ok=True)
+            eps_label = str(eps).replace("-", "m").replace(".", "p")
+            outpath = pareto_config.save_per_point_path / f"pareto_eps_{eps_label}.nc"
+
+            io.save_netcdf(results.expand_dims(pareto=[eps]), "results", "w", outpath)
+            io.save_netcdf(xr.Dataset(attrs=self.dump_all_attrs()), "attrs", "a", outpath)
+            io.save_netcdf(self.inputs, "inputs", "a", outpath)
+        else:
+            LOGGER.info(
+                "Optimisation model | Infeasible or unbounded problem | "
+                f"No Pareto eps={eps} results to save to file."
+            )
 
     def _solve_spores(self, solver_config: config_schema.Solve) -> xr.Dataset:
         """Solve in spores (i.e. modelling to generate alternatives - MGA) mode.
