@@ -15,7 +15,7 @@ config:
       method: epsilon
       primary_cost: monetary
       secondary_cost: emissions
-      epsilons: [1000000, 100000000, 10000000000]
+      epsilons: [20, 110, 200]
 
 data_definitions:
   objective_cost_weights:

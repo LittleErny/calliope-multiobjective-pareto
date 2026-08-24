@@ -1,7 +1,7 @@
 import pytest
 
 from calliope.exceptions import ModelError
-from .common.util import build_test_model as build_model
+from tests.common.util import build_test_model as build_model
 
 
 class TestParetoMode:
@@ -16,7 +16,7 @@ class TestParetoMode:
         # Make epsilons "safe" to avoid infeasibility due to scale/unit differences.
         # This guarantees the epsilon constraint is feasible and we can test
         # that the pareto mode runs and respects the constraint.
-        m.config = m.config.update({"solve.pareto.epsilons": [1e6, 1e8, 1e10]})
+        m.config = m.config.update({"solve.pareto.epsilons": [20, 110, 200]})
 
         m.build()
         m.solve()

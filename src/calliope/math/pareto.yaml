@@ -1,0 +1,80 @@
+parameters:
+  pareto_secondary_cost_weights:
+    description: One-hot weights selecting the secondary cost class.
+    default: 0
+    unit: unitless
+
+  pareto_epsilon:
+    description: Upper bound on the secondary (constrained) metric in Pareto mode.
+    default: .inf
+    unit: cost
+
+  pareto_secondary_range:
+    description: Range used to normalise the augmentation slack penalty.
+    default: 1
+    unit: cost
+
+  pareto_lambda:
+    description: Small augmentation penalty applied to normalised secondary slack.
+    default: 1e-6
+    unit: unitless
+
+global_expressions:
+  pareto_secondary_metric:
+    description: >-
+      Secondary cost total used by the default cost-class Pareto formulation.
+      Override this expression in additional math to bind Pareto mode to another
+      lower-is-better global metric.
+    default: 0
+    unit: cost
+    equations:
+      - expression: sum(sum(cost, over=[nodes, techs]) * pareto_secondary_cost_weights, over=costs)
+
+constraints:
+  pareto_secondary_metric_max:
+    description: Match the secondary metric and slack to the epsilon value.
+    equations:
+      - expression: pareto_secondary_metric + pareto_slack == pareto_epsilon
+
+variables:
+  pareto_slack:
+    description: Slack in the secondary metric epsilon constraint.
+    default: 0
+    unit: cost
+    bounds:
+      min: 0
+      max: pareto_secondary_range
+
+objectives:
+  min_cost_optimisation:
+    description: Minimise primary cost with a normalised Pareto slack penalty.
+    equations:
+      - expression: >-
+          sum(
+            sum(cost, over=[nodes, techs])
+            * objective_cost_weights,
+            over=costs
+          ) + $unmet_demand + pareto_lambda * pareto_slack / pareto_secondary_range
+          + pareto_lambda * pareto_secondary_metric / pareto_secondary_range
+    sub_expressions:
+      unmet_demand:
+        - expression: >-
+            sum(
+              sum(unmet_demand - unused_supply, over=[carriers, nodes])
+              * timestep_weights,
+              over=timesteps
+            ) * bigM
+    sense: minimise
+
+postprocessed:
+  pareto_primary_cost_total:
+    description: Total primary cost at each Pareto point.
+    unit: cost
+    equations:
+      - expression: sum(sum(cost, over=[nodes, techs]) * objective_cost_weights, over=costs)
+
+  pareto_secondary_cost_total:
+    description: Total secondary cost at each Pareto point.
+    unit: cost
+    equations:
+      - expression: sum(sum(cost, over=[nodes, techs]) * pareto_secondary_cost_weights, over=costs)

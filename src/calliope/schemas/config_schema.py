@@ -204,41 +204,24 @@ class SolveSpores(CalliopeBaseModel):
 
 
 class SolvePareto(CalliopeBaseModel):
-    """Pareto (epsilon-constraint) solve configuration options.
-
-    This mode performs multiple solves to approximate a Pareto frontier by
-    minimising a *primary* cost while constraining a *secondary* cost to be below
-    user-defined epsilon values.
-    """
-
-    model_config = {"title": "Model solve pareto mode configuration"}
-
     method: Literal["epsilon"] = Field(default="epsilon")
-    """Pareto search method. Currently only the epsilon-constraint method is supported."""
-
-    primary_cost: str = Field(default="monetary")
-    """Name of the primary cost class to minimise (e.g., `monetary`)."""
-
-    secondary_cost: str = Field(default="co2")
-    """Name of the secondary cost class to constrain (default: `co2`)."""
-
+    primary_objective: str = Field(default="min_cost_optimisation")
+    """Name of any objective defined in the merged math (built-in or user-defined)."""
+    primary_cost: str | None = None
+    """Cost class to minimise when using the built-in cost objective."""
+    secondary_cost: str | None = None
+    """Cost class constrained by the epsilon value."""
+    secondary_metric: str | None = None
+    """Name of a custom lower-is-better metric supplied by extra math."""
+    secondary_objective: str | None = None
+    """Objective used to calculate the custom metric payoff point."""
     epsilons: list[float] = Field(default_factory=list)
-    """List of epsilon values for the secondary cost constraint."""
-
+    n_points: int | None = Field(default=None, ge=2)
+    """Number of epsilon points generated from the cost payoff table."""
     epsilon_tolerance: float = Field(default=1e-6)
-    """Numerical tolerance when checking constraint satisfaction."""
-
     save_per_point_path: Path | None = None
-    """If given, save each Pareto point to this directory as a NetCDF file."""
-
     use_latest_results: bool = False
-    """If true and the model already contains Pareto results, skip epsilons already solved."""
-
     stop_on_infeasible: bool = True
-    """If true, stop the Pareto run when an infeasible/non-optimal epsilon is 
-    encountered. Mirrors the behaviour of `spores` mode, which stops iterating once the 
-    model becomes infeasible."""
-
 
 class Solve(CalliopeBaseModel):
     """Base configuration options used when solving a Calliope optimisation problem (`calliope.Model.solve`)."""

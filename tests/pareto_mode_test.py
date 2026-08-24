@@ -1,5 +1,4 @@
 import pytest
-import xarray as xr
 
 from calliope.exceptions import ModelError
 
@@ -16,19 +15,22 @@ class TestParetoMode:
         assert "pareto" in m.results.dims
         eps = list(m.results.coords["pareto"].values)
         assert eps == sorted(eps)
-        assert len(eps) == 3
+        assert eps == [20, 110, 200]
 
         # Check that the secondary cost constraint is respected at each pareto point
         # (The pareto math adds a postprocessed `pareto_secondary_cost_total` scalar per point.)
         secondary_total = m.results["pareto_secondary_cost_total"].values
+        slack = m.results["pareto_slack"].values
         for e, tot in zip(eps, secondary_total):
             assert float(tot) <= float(e) + 1e-6
+        assert secondary_total + slack == pytest.approx(eps)
 
-        # Check that tightening epsilon cannot decrease the primary cost
-        primary_total = m.results["pareto_primary_cost_total"]
-        # As eps increases, mprimray_total should be non-increasing
-        # (relaxing the emissions cap can only help the primary objective)
-        assert (primary_total.diff("pareto") <= 1e-6).all()
+        assert m.results["pareto_primary_cost_total"].values == pytest.approx(
+            [60, 40, 20]
+        )
+        assert m.results["pareto_secondary_cost_total"].values == pytest.approx(
+            [20, 110, 200]
+        )
 
     def test_pareto_requires_epsilons(self):
         m = build_model(model_file="model_pareto.yaml")
@@ -43,3 +45,52 @@ class TestParetoMode:
         m.build()
         with pytest.raises(ModelError, match="Secondary cost 'co2' not found"):
             m.solve(force=True)
+
+    def test_pareto_math_is_not_loaded_in_base_mode(self):
+        m = build_model(
+            model_file="model_pareto.yaml",
+            override_dict={"config.init.mode": "base"},
+        )
+        m.build()
+
+        assert "pareto_epsilon" not in m.math.build.parameters
+        assert "pareto_secondary_cost_weights" not in m.math.build.parameters
+
+    def test_pareto_secondary_metric_can_be_overridden_by_math(self):
+        m = build_model(
+            model_file="model_pareto.yaml",
+            math_dict={
+                "global_expressions": {
+                    "pareto_secondary_metric": {
+                        "description": "Doubled emissions metric.",
+                        "default": 0,
+                        "unit": "cost",
+                        "equations": [
+                            {
+                                "expression": "2 * sum(sum(cost, over=[nodes, techs]) * pareto_secondary_cost_weights, over=costs)"
+                            }
+                        ],
+                    }
+                }
+            },
+            override_dict={"config.solve.pareto.epsilons": [40, 220, 400]},
+        )
+        m.build()
+        m.solve()
+
+        assert m.results["pareto_primary_cost_total"].values == pytest.approx(
+            [60, 40, 20]
+        )
+
+    def test_pareto_generates_epsilons_from_payoff_table(self):
+        m = build_model(
+            model_file="model_pareto.yaml",
+            override_dict={
+                "config.solve.pareto.epsilons": [],
+                "config.solve.pareto.n_points": 3,
+            },
+        )
+        m.build()
+        m.solve()
+
+        assert list(m.results.coords["pareto"].values) == [20, 110, 200]
