@@ -84,23 +84,23 @@ objective has alternative optima.
 
 ## Methods
 
-Let the two minimisation objectives be \(f_1(x)\) and \(f_2(x)\). Their normalised
+Let the two minimisation objectives be $f_1(x)$ and $f_2(x)$. Their normalised
 deviations from the ideal point are
 
-\[
+$$
 \hat f_i(x) = \frac{f_i(x) - f_i^{ideal}}{R_i},
-\]
+$$
 
-where \(R_i\) is the objective's payoff range calculated from the anchor solutions.
+where $R_i$ is the objective's payoff range calculated from the anchor solutions.
 
 ### Normalised weighted-sum sweep
 
-`WeightedSumSweep` evaluates a uniform grid with \(w_1 \in [0, 1]\) and
-\(w_2 = 1-w_1\). Each interior point solves
+`WeightedSumSweep` evaluates a uniform grid with $w_1 \in [0, 1]$ and
+$w_2 = 1-w_1$. Each interior point solves
 
-\[
+$$
 \min_{x \in X} w_1 \hat f_1(x) + w_2 \hat f_2(x).
-\]
+$$
 
 The two refined anchor solutions are reused as the endpoints. Different weights may
 return the same solution, and a weighted sum cannot recover unsupported points on a
@@ -115,13 +115,13 @@ Research background:
 each value on an automatically generated epsilon grid, it solves the equivalent
 normalised formulation
 
-\[
+$$
 \begin{aligned}
 \min_{x,s}\quad & f_1(x) - \rho R_1 s \\
 \text{subject to}\quad & \frac{f_2(x)}{R_2} + s = \frac{\epsilon}{R_2}, \\
 & s \ge 0, \quad x \in X.
 \end{aligned}
-\]
+$$
 
 The small augmentation term rewards unused slack and prevents weakly efficient
 solutions. Swap `objective_1` and `objective_2` in `ParetoStudy` to reverse which
@@ -132,19 +132,19 @@ Research background:
 
 ### Augmented weighted Tchebycheff sweep
 
-`AugmentedTchebycheffSweep` introduces a non-negative auxiliary variable \(z\). For
+`AugmentedTchebycheffSweep` introduces a non-negative auxiliary variable $z$. For
 each weight pair it solves
 
-\[
+$$
 \begin{aligned}
 \min_{x,z}\quad & z + \rho\left(\hat f_1(x)+\hat f_2(x)\right) \\
 \text{subject to}\quad & w_1\hat f_1(x) \le z, \\
 & w_2\hat f_2(x) \le z, \\
 & z \ge 0, \quad x \in X.
 \end{aligned}
-\]
+$$
 
-Minimising \(z\) is the linear epigraph form of minimising the worst weighted
+Minimising $z$ is the linear epigraph form of minimising the worst weighted
 normalised deviation from the ideal point. The L1 augmentation distinguishes
 solutions with the same maximum deviation. Unlike a weighted sum, this formulation
 can recover unsupported Pareto points.
