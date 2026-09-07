@@ -15,6 +15,8 @@ class _FakeBackend:
     def __init__(self, model):
         self.model = model
         self.objective = "min_cost_optimisation"
+        self.constraints = {}
+        self.objectives = {}
         self.inputs = xr.Dataset(
             {"objective_cost_weights": ("costs", [1.0, 0.0])},
             coords={"costs": ["money", "emissions"]},
@@ -38,10 +40,10 @@ class _FakeBackend:
         self.inputs[name] = min
 
     def add_constraint(self, name, definition):
-        pass
+        self.constraints[name] = definition
 
     def add_objective(self, name, definition):
-        pass
+        self.objectives[name] = definition
 
 
 class _FakeModel:
@@ -64,6 +66,17 @@ class _FakeModel:
             )
             feasible = [point for point in self.feasible_points if point[1] <= epsilon]
             point = min(feasible, key=lambda candidate: (candidate[0], candidate[1]))
+        elif self.backend.objective == "pareto_augmented_tchebycheff_objective":
+            weights = self.backend.inputs["objective_cost_weights"].values
+            values = np.asarray(self.feasible_points)
+            ideal = values.min(axis=0)
+            ranges = values.max(axis=0) - ideal
+
+            def augmented_tchebycheff(point):
+                normalized = (np.asarray(point) - ideal) / ranges
+                return max(weights * normalized) + 1e-6 * sum(normalized)
+
+            point = min(self.feasible_points, key=augmented_tchebycheff)
         else:
             weights = self.backend.inputs["objective_cost_weights"].values
             point = min(self.feasible_points, key=lambda p: np.dot(weights, p))
@@ -152,6 +165,7 @@ def test_augmented_epsilon_finds_unsupported_point():
 
     weighted = unsupported_study.run(WeightedSumSweep(points=101))
     epsilon = unsupported_study.run(AugmentedEpsilonConstraint(points=10))
+    tchebycheff = unsupported_study.run(AugmentedTchebycheffSweep(points=11))
 
     weighted_points = set(
         map(tuple, weighted.points[["objective_1", "objective_2"]].values)
@@ -159,8 +173,12 @@ def test_augmented_epsilon_finds_unsupported_point():
     epsilon_points = set(
         map(tuple, epsilon.points[["objective_1", "objective_2"]].values)
     )
+    tchebycheff_points = set(
+        map(tuple, tchebycheff.points[["objective_1", "objective_2"]].values)
+    )
     assert (4.0, 8.0) not in weighted_points
     assert (4.0, 8.0) in epsilon_points
+    assert (4.0, 8.0) in tchebycheff_points
 
 
 def test_epsilon_plot_shows_method_parameters(study):
@@ -173,9 +191,38 @@ def test_epsilon_plot_shows_method_parameters(study):
     assert "slack=0.5" in figure.data[0].customdata[1, 1]
 
 
-def test_future_method_placeholder(study):
-    with pytest.raises(NotImplementedError):
-        study.run(AugmentedTchebycheffSweep())
+def test_augmented_tchebycheff_sweep(study):
+    result = study.run(AugmentedTchebycheffSweep(points=3))
+
+    assert result.method == "augmented_tchebycheff"
+    assert result.points["weight_1"].tolist() == [0.0, 0.5, 1.0]
+    assert result.points[["objective_1", "objective_2"]].values.tolist() == [
+        [10.0, 1.0],
+        [3.0, 5.0],
+        [1.0, 10.0],
+    ]
+    assert result.solution(1)["cost"].sel(costs="money").item() == 3.0
+
+
+def test_tchebycheff_objective_contains_augmentation():
+    model = _FakeModel()
+    objectives = (Objective("money"), Objective("emissions"))
+    method = AugmentedTchebycheffSweep(augmentation=0.123)
+
+    method._add_backend_components(
+        model,
+        objectives,
+        ideal_values=(1.0, 1.0),
+        ranges=(9.0, 9.0),
+    )
+
+    expression = model.backend.objectives[method._OBJECTIVE]["equations"][0][
+        "expression"
+    ]
+    assert "pareto_tchebycheff_z + 0.123 *" in expression
+    assert "objective_cost_weights[costs=money]" in str(
+        model.backend.constraints[method._CONSTRAINT_1]
+    )
 
 
 def test_study_requires_distinct_objectives():

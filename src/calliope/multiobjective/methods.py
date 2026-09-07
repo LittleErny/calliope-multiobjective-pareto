@@ -1,8 +1,7 @@
 """Pareto-front generation methods.
 
-Weighted-sum and augmented epsilon-constraint sweeps are implemented without
-putting method branches into :class:`calliope.Model`. Augmented Tchebycheff is
-kept as the next explicit extension point.
+Weighted-sum, augmented epsilon-constraint, and augmented Tchebycheff sweeps
+are implemented without putting method branches into :class:`calliope.Model`.
 """
 
 from __future__ import annotations
@@ -39,9 +38,16 @@ class _AnchorSolutions:
 
     endpoint_1: xr.Dataset
     endpoint_2: xr.Dataset
+    ideal_values: tuple[float, float]
     values_1: tuple[float, float]
     values_2: tuple[float, float]
     ranges: tuple[float, float]
+
+
+_UNMET_DEMAND_PENALTY = (
+    "sum(sum(unmet_demand - unused_supply, over=[carriers, nodes]) "
+    "* timestep_weights, over=timesteps) * bigM"
+)
 
 
 def _validate_model(model: Model, objectives: tuple[Objective, Objective]) -> list:
@@ -64,6 +70,32 @@ def _objective_values(
         float(result["cost"].sel(costs=objective.cost_class).fillna(0).sum().item())
         for objective in objectives
     )
+
+
+def _objective_weights(
+    costs: list,
+    objectives: tuple[Objective, Objective],
+    weight_1: float,
+    weight_2: float,
+) -> xr.DataArray:
+    """Create a complete Calliope cost-class weight array."""
+    return xr.DataArray(
+        [
+            weight_1
+            if cost == objectives[0].cost_class
+            else weight_2
+            if cost == objectives[1].cost_class
+            else 0.0
+            for cost in costs
+        ],
+        coords={"costs": costs},
+        dims="costs",
+    )
+
+
+def _cost_expression(objective: Objective) -> str:
+    """Return the scalar total-cost expression for one cost class."""
+    return f"sum(cost[costs={objective.cost_class}], over=[nodes, techs])"
 
 
 def _safe_range(value: float, objective: Objective, tolerance: float) -> float:
@@ -89,17 +121,8 @@ def _solve_weighted_objective(
     scale = max(abs(backend_weight_1), abs(backend_weight_2))
     backend_weight_1 /= scale
     backend_weight_2 /= scale
-    weights = xr.DataArray(
-        [
-            backend_weight_1
-            if cost == objectives[0].cost_class
-            else backend_weight_2
-            if cost == objectives[1].cost_class
-            else 0.0
-            for cost in costs
-        ],
-        coords={"costs": costs},
-        dims="costs",
+    weights = _objective_weights(
+        costs, objectives, backend_weight_1, backend_weight_2
     )
     model.backend.update_input("objective_cost_weights", weights)
     model.backend.set_objective("min_cost_optimisation")
@@ -158,6 +181,7 @@ def _anchor_solutions(
     return _AnchorSolutions(
         endpoint_1=endpoint_1,
         endpoint_2=endpoint_2,
+        ideal_values=(raw_values_1[0], raw_values_2[1]),
         values_1=values_1,
         values_2=values_2,
         ranges=(
@@ -356,20 +380,10 @@ class AugmentedEpsilonConstraint(ParetoMethod):
         constrained_range: float,
     ) -> None:
         """Inject the scalar AUGMECON formulation into a built backend."""
-        primary = (
-            f"sum(cost[costs={objectives[0].cost_class}], "
-            "over=[nodes, techs])"
-        )
-        constrained = (
-            f"sum(cost[costs={objectives[1].cost_class}], "
-            "over=[nodes, techs])"
-        )
+        primary = _cost_expression(objectives[0])
+        constrained = _cost_expression(objectives[1])
         normalized_epsilon = float(epsilon) / constrained_range
         augmentation_coefficient = self.augmentation * primary_range
-        unmet_demand_penalty = (
-            "sum(sum(unmet_demand - unused_supply, over=[carriers, nodes]) "
-            "* timestep_weights, over=timesteps) * bigM"
-        )
 
         model.backend.add_variable(
             self._EPSILON_VARIABLE,
@@ -403,7 +417,7 @@ class AugmentedEpsilonConstraint(ParetoMethod):
                     {
                         "expression": (
                             f"{primary} - {augmentation_coefficient!r} * "
-                            f"{self._SLACK_VARIABLE} + {unmet_demand_penalty}"
+                            f"{self._SLACK_VARIABLE} + {_UNMET_DEMAND_PENALTY}"
                         )
                     }
                 ],
@@ -415,15 +429,151 @@ class AugmentedEpsilonConstraint(ParetoMethod):
 
 @dataclass(frozen=True)
 class AugmentedTchebycheffSweep(ParetoMethod):
-    """Architecture placeholder for an augmented Tchebycheff sweep."""
+    """Sweep an augmented weighted Tchebycheff scalarisation."""
 
     name: ClassVar[str] = "augmented_tchebycheff"
+    points: int = 11
+    augmentation: float = 1e-6
+    normalization_tolerance: float = 1e-12
+    endpoint_tie_breaker: float = 1e-6
+
+    _AUXILIARY_VARIABLE: ClassVar[str] = "pareto_tchebycheff_z"
+    _CONSTRAINT_1: ClassVar[str] = "pareto_tchebycheff_constraint_1"
+    _CONSTRAINT_2: ClassVar[str] = "pareto_tchebycheff_constraint_2"
+    _OBJECTIVE: ClassVar[str] = "pareto_augmented_tchebycheff_objective"
+
+    def __post_init__(self) -> None:
+        """Validate sweep settings."""
+        if self.points < 2:
+            raise ValueError(
+                "AugmentedTchebycheffSweep.points must be at least 2."
+            )
+        if not 0 < self.augmentation < 1:
+            raise ValueError("augmentation must be between 0 and 1.")
+        if not 0 < self.endpoint_tie_breaker < 1:
+            raise ValueError("endpoint_tie_breaker must be between 0 and 1.")
 
     def run(self, study: ParetoStudy) -> ParetoResult:
-        """Reserve the strategy entry point for the next implementation step."""
-        # TODO: reuse the payoff ranges calculated by a shared anchor helper.
-        # TODO: add scalar z and constraints w_i * normalised(f_i) <= z.
-        # TODO: minimise z plus a small L1 augmentation term and sweep weights.
-        raise NotImplementedError(
-            "Augmented Tchebycheff is sketched but not implemented yet."
+        """Generate efficient points over a two-objective weight grid."""
+        model = study._new_built_model()
+        objectives = (study.objective_1, study.objective_2)
+        costs = _validate_model(model, objectives)
+        anchors = _anchor_solutions(
+            model,
+            costs,
+            objectives,
+            study,
+            self.normalization_tolerance,
+            self.endpoint_tie_breaker,
         )
+
+        ranges = (
+            _safe_range(
+                abs(anchors.values_2[0] - anchors.ideal_values[0]),
+                objectives[0],
+                self.normalization_tolerance,
+            ),
+            _safe_range(
+                abs(anchors.values_1[1] - anchors.ideal_values[1]),
+                objectives[1],
+                self.normalization_tolerance,
+            ),
+        )
+        if self.points > 2:
+            self._add_backend_components(
+                model, objectives, anchors.ideal_values, ranges
+            )
+
+        rows: list[dict] = []
+        solutions: list[xr.Dataset] = []
+        for point_id, weight_1 in enumerate(np.linspace(0, 1, self.points)):
+            weight_2 = 1 - weight_1
+            if np.isclose(weight_1, 0):
+                result = anchors.endpoint_2
+            elif np.isclose(weight_1, 1):
+                result = anchors.endpoint_1
+            else:
+                weights = _objective_weights(
+                    costs, objectives, float(weight_1), float(weight_2)
+                )
+                model.backend.update_input("objective_cost_weights", weights)
+                model.solve(force=True, **study.solve_options)
+                result = model.results.copy(deep=True)
+
+            objective_1, objective_2 = _objective_values(result, objectives)
+            rows.append(
+                {
+                    "point_id": point_id,
+                    "weight_1": float(weight_1),
+                    "weight_2": float(weight_2),
+                    "objective_1": objective_1,
+                    "objective_2": objective_2,
+                }
+            )
+            solutions.append(result)
+
+        return ParetoResult(
+            method=self.name,
+            objective_1=objectives[0],
+            objective_2=objectives[1],
+            points=pd.DataFrame(rows),
+            solutions=tuple(solutions),
+        )
+
+    def _add_backend_components(
+        self,
+        model: Model,
+        objectives: tuple[Objective, Objective],
+        ideal_values: tuple[float, float],
+        ranges: tuple[float, float],
+    ) -> None:
+        """Inject the augmented weighted Tchebycheff formulation."""
+        normalized = tuple(
+            (
+                f"(({_cost_expression(objective)}) - {ideal!r}) "
+                f"/ {objective_range!r}"
+            )
+            for objective, ideal, objective_range in zip(
+                objectives, ideal_values, ranges
+            )
+        )
+
+        model.backend.add_variable(
+            self._AUXILIARY_VARIABLE,
+            {"bounds": {"min": 0, "max": np.inf}, "default": 0},
+        )
+        for name, objective, expression in zip(
+            (self._CONSTRAINT_1, self._CONSTRAINT_2), objectives, normalized
+        ):
+            model.backend.add_constraint(
+                name,
+                {
+                    "equations": [
+                        {
+                            "expression": (
+                                "objective_cost_weights"
+                                f"[costs={objective.cost_class}] * "
+                                f"{expression} <= {self._AUXILIARY_VARIABLE}"
+                            )
+                        }
+                    ]
+                },
+            )
+
+        model.backend.add_objective(
+            self._OBJECTIVE,
+            {
+                "equations": [
+                    {
+                        "expression": (
+                            f"{self._AUXILIARY_VARIABLE} + "
+                            f"{self.augmentation!r} * "
+                            f"({normalized[0]} + {normalized[1]}) + "
+                            f"{_UNMET_DEMAND_PENALTY}"
+                        )
+                    }
+                ],
+                "sense": "minimise",
+            },
+        )
+        model.backend.set_objective(self._OBJECTIVE)
