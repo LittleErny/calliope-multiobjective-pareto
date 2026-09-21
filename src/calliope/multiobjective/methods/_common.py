@@ -44,6 +44,17 @@ _UNMET_DEMAND_PENALTY = (
 )
 
 
+def _report_progress(
+    enabled: bool, label: str, completed: int | None, total: int
+) -> None:
+    """Print one compact, in-place progress line for notebook runs."""
+    if not enabled:
+        return
+    status = "preparing anchor solutions" if completed is None else f"{completed}/{total}"
+    message = f"{label}: {status}"
+    print(f"\r{message:<72}", end="\n" if completed == total else "", flush=True)
+
+
 def _validate_model(model: Model, objectives: tuple[Objective, Objective]) -> list:
     if "costs" not in model.inputs.coords:
         raise ValueError("Pareto methods require a Calliope `costs` dimension.")

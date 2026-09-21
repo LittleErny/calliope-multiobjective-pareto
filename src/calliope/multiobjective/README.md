@@ -47,10 +47,16 @@ study = ParetoStudy(
     },
 )
 
-weighted = study.run(WeightedSumSweep(points=20))
-epsilon = study.run(AugmentedEpsilonConstraint(points=20, augmentation=1e-6))
+weighted = study.run(WeightedSumSweep(points=20, show_progress=True))
+epsilon = study.run(
+    AugmentedEpsilonConstraint(
+        points=20, augmentation=1e-6, show_progress=True
+    )
+)
 tchebycheff = study.run(
-    AugmentedTchebycheffSweep(points=20, augmentation=1e-6)
+    AugmentedTchebycheffSweep(
+        points=20, augmentation=1e-6, show_progress=True
+    )
 )
 
 tchebycheff.points       # one row per requested point
@@ -161,6 +167,10 @@ Research background:
 `result.plot()` groups exactly coincident objective vectors, shows their point IDs and
 method parameters on hover, and reports both requested and unique point counts in the
 title. Plotly is imported lazily and is only required for plotting.
+
+Set `show_progress=True` on any method to print one compact notebook-friendly
+counter (`5/20`, for example). Solver output remains controlled independently by
+Calliope's logging configuration.
 
 ## Numerical settings
 

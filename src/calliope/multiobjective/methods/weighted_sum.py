@@ -13,6 +13,7 @@ from calliope.multiobjective.methods._common import (
     ParetoMethod,
     _anchor_solutions,
     _objective_values,
+    _report_progress,
     _safe_range,
     _solve_weighted_objective,
     _validate_model,
@@ -31,6 +32,7 @@ class WeightedSumSweep(ParetoMethod):
     points: int = 11
     normalization_tolerance: float = 1e-12
     endpoint_tie_breaker: float = 1e-6
+    show_progress: bool = False
 
     def __post_init__(self) -> None:
         """Validate sweep settings."""
@@ -44,6 +46,7 @@ class WeightedSumSweep(ParetoMethod):
         model = study._new_built_model()
         objectives = (study.objective_1, study.objective_2)
         costs = _validate_model(model, objectives)
+        _report_progress(self.show_progress, "Weighted sum", None, self.points)
         anchors = _anchor_solutions(
             model,
             costs,
@@ -86,6 +89,9 @@ class WeightedSumSweep(ParetoMethod):
                 }
             )
             solutions.append(result)
+            _report_progress(
+                self.show_progress, "Weighted sum", point_id + 1, self.points
+            )
 
         return ParetoResult(
             method=self.name,

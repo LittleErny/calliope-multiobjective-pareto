@@ -118,6 +118,28 @@ def test_weighted_sum_sweep(study):
     assert result.solution(1)["cost"].sel(costs="money").item() == 3.0
 
 
+@pytest.mark.parametrize(
+    ("method", "label"),
+    [
+        (WeightedSumSweep(points=3, show_progress=True), "Weighted sum"),
+        (
+            AugmentedEpsilonConstraint(points=3, show_progress=True),
+            "Augmented epsilon-constraint",
+        ),
+        (
+            AugmentedTchebycheffSweep(points=3, show_progress=True),
+            "Augmented Tchebycheff",
+        ),
+    ],
+)
+def test_compact_progress_output(study, capsys, method, label):
+    study.run(method)
+
+    output = capsys.readouterr().out
+    assert f"{label}: preparing anchor solutions" in output
+    assert f"{label}: 3/3" in output
+
+
 def test_plot_returns_figure(study):
     pytest.importorskip("plotly")
     result = study.run(WeightedSumSweep(points=3))

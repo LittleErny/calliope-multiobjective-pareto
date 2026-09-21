@@ -16,6 +16,7 @@ from calliope.multiobjective.methods._common import (
     _cost_expression,
     _objective_values,
     _objective_weights,
+    _report_progress,
     _safe_range,
     _validate_model,
 )
@@ -35,6 +36,7 @@ class AugmentedTchebycheffSweep(ParetoMethod):
     augmentation: float = 1e-6
     normalization_tolerance: float = 1e-12
     endpoint_tie_breaker: float = 1e-6
+    show_progress: bool = False
 
     _AUXILIARY_VARIABLE: ClassVar[str] = "pareto_tchebycheff_z"
     _CONSTRAINT_1: ClassVar[str] = "pareto_tchebycheff_constraint_1"
@@ -55,6 +57,9 @@ class AugmentedTchebycheffSweep(ParetoMethod):
         model = study._new_built_model()
         objectives = (study.objective_1, study.objective_2)
         costs = _validate_model(model, objectives)
+        _report_progress(
+            self.show_progress, "Augmented Tchebycheff", None, self.points
+        )
         anchors = _anchor_solutions(
             model,
             costs,
@@ -108,6 +113,12 @@ class AugmentedTchebycheffSweep(ParetoMethod):
                 }
             )
             solutions.append(result)
+            _report_progress(
+                self.show_progress,
+                "Augmented Tchebycheff",
+                point_id + 1,
+                self.points,
+            )
 
         return ParetoResult(
             method=self.name,
