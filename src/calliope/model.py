@@ -292,6 +292,20 @@ class Model(ModelStructure):
         self.config = self.config.update({"build": kwargs})
 
         mode = self.config.init.mode
+        weights = self.inputs.get("objective_cost_weights")
+        if (
+            mode == "multiobjective"
+            and "costs" in self.inputs.coords
+            and (weights is None or "costs" not in weights.dims)
+        ):
+            # The base objective may have scalar weights. Pareto sweeps must be able
+            # to update each cost class independently on the already built backend.
+            self.inputs["objective_cost_weights"] = xr.DataArray(
+                np.ones(self.inputs.sizes["costs"]),
+                coords={"costs": self.inputs.coords["costs"]},
+                dims="costs",
+                attrs={"obj_type": "parameters"},
+            )
         if mode == "operate":
             backend_input = self._prepare_operate_mode_inputs(self.config.build.operate)
         else:
@@ -349,6 +363,11 @@ class Model(ModelStructure):
 
         self.config = self.config.update({"solve": kwargs})
 
+        if self.config.init.mode == "multiobjective" and self.is_solved and force:
+            # Augmented methods add backend components after their anchor solves.
+            # A fresh backend avoids retaining those components on a second sweep.
+            self.build(force=True)
+
         self.backend.shadow_prices.track_constraints(self.config.solve.shadow_prices)
 
         mode = self.config.init.mode
@@ -362,6 +381,10 @@ class Model(ModelStructure):
             results = self._solve_operate(self.config.solve)
         elif mode == "spores":
             results = self._solve_spores(self.config.solve)
+        elif mode == "multiobjective":
+            from calliope.multiobjective.runner import solve_multiobjective
+
+            results = solve_multiobjective(self, self.config.solve)
         else:
             results = self.backend._solve(self.config.solve, warmstart=warmstart)
 

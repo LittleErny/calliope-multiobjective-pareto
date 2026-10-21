@@ -14,7 +14,14 @@ from calliope.schemas import math_schema
 from ..common.util import build_test_model as build_model
 from ..common.util import check_error_or_warning
 
-PRE_DEFINED_MATH = ["base", "operate", "spores", "storage_inter_cluster", "milp"]
+PRE_DEFINED_MATH = [
+    "base",
+    "operate",
+    "spores",
+    "multiobjective",
+    "storage_inter_cluster",
+    "milp",
+]
 LOGGER = "calliope.preprocess.model_math"
 
 

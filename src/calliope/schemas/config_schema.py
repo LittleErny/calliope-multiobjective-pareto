@@ -16,7 +16,7 @@ from calliope.schemas.general import (
     UniqueList,
 )
 
-Mode = Literal["base", "operate", "spores"]
+Mode = Literal["base", "operate", "spores", "multiobjective"]
 
 LOGGER = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ class Init(CalliopeBaseModel):
     Some math entry names are linked to specific functionality, so re-defining them here will overwrite the pre-defined math.:
     - `base`: replaces the pre-defined base math.
     - `milp`: replaces the mixed integer math.
-    - `spores`/`operate`: replaces the respective pre-defined mode math.
+    - `spores`/`operate`/`multiobjective`: replaces the respective pre-defined mode math.
     - `storage_inter_cluster`: replaces the pre-defined storage inter-cluster math.
     """
 
@@ -203,6 +203,38 @@ class SolveSpores(CalliopeBaseModel):
     """
 
 
+class SolveMultiobjective(CalliopeBaseModel):
+    """Settings for a two-cost-class Pareto sweep."""
+
+    model_config = {"title": "Model solve multiobjective mode configuration"}
+
+    objective_1: str | None = None
+    """Cost class minimised first in an epsilon-constraint sweep."""
+
+    objective_2: str | None = None
+    """Second cost class, constrained in an epsilon-constraint sweep."""
+
+    method: Literal[
+        "weighted_sum", "augmented_epsilon_constraint", "augmented_tchebycheff"
+    ] = "weighted_sum"
+    """Scalarisation method used to generate the Pareto points."""
+
+    points: int = Field(default=11, ge=2)
+    """Number of requested Pareto points, including both endpoints."""
+
+    augmentation: float = Field(default=1e-6, gt=0, lt=1)
+    """Secondary objective coefficient for the augmented methods."""
+
+    normalization_tolerance: float = Field(default=1e-12, gt=0)
+    """Smallest payoff range treated as measurable."""
+
+    endpoint_tie_breaker: float = Field(default=1e-6, gt=0, lt=1)
+    """Secondary weight used to refine the two single-objective endpoints."""
+
+    show_progress: bool = False
+    """Print a compact counter while generating points."""
+
+
 class Solve(CalliopeBaseModel):
     """Base configuration options used when solving a Calliope optimisation problem (`calliope.Model.solve`)."""
 
@@ -231,6 +263,9 @@ class Solve(CalliopeBaseModel):
 
     spores: SolveSpores = SolveSpores()
     """Spores configuration."""
+
+    multiobjective: SolveMultiobjective = SolveMultiobjective()
+    """Multiobjective mode configuration."""
 
     zero_threshold: float = Field(default=1e-10)
     """On postprocessing the optimisation results, values smaller than this threshold will be considered as optimisation artefacts and will be set to zero."""
