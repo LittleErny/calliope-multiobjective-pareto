@@ -1,0 +1,4 @@
+# Pareto mode uses the base cost objective for its anchor solves. Its augmented
+# constraints and objectives depend on the solved payoff ranges and are added to
+# the built backend by calliope.multiobjective.methods after those solves.
+{}

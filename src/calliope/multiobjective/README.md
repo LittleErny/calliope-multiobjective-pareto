@@ -1,9 +1,9 @@
 # Bi-objective Pareto sweeps for Calliope
 
-This module is a small solver-backed MVP for generating Pareto-front samples from
-two Calliope cost classes. It keeps the standard Calliope model and solver workflow:
-each multi-objective method scalarises the two objectives into one LP/MILP objective,
-then solves the same built backend repeatedly with different scalarisation parameters.
+The `multiobjective` run mode generates Pareto-front samples from two Calliope
+cost classes. Like `spores`, it runs multiple scalar optimisations on one built
+backend. Each method turns the two objectives into one LP/MILP objective for each
+point.
 
 The implementation is intentionally limited to:
 
@@ -18,55 +18,35 @@ The implementation is intentionally limited to:
 from pathlib import Path
 
 import calliope
-from calliope.multiobjective import (
-    AugmentedEpsilonConstraint,
-    AugmentedTchebycheffSweep,
-    Objective,
-    ParetoStudy,
-    WeightedSumSweep,
-)
+from calliope.multiobjective import ParetoResult
 
 MODEL_PATH = Path("path/to/model.yaml")
-
-
-def model_factory():
-    # The factory must return a fresh, unsolved model on every call.
-    return calliope.read_yaml(MODEL_PATH, scenario="minimize_emissions_costs")
-
-
-study = ParetoStudy(
-    model_factory=model_factory,
-    objective_1=Objective("monetary", label="Total system cost", unit="EUR"),
-    objective_2=Objective("emissions", label="CO2 emissions", unit="kg CO2"),
-    solve_options={
-        "solver": "cbc",
-        "solver_options": {
-            "primalTolerance": 1e-10,
-            "dualTolerance": 1e-10,
-        },
-    },
+model = calliope.read_yaml(
+    MODEL_PATH, scenario="minimize_emissions_costs", mode="multiobjective"
+)
+model.build()
+model.solve(
+    multiobjective={
+        "objective_1": "monetary",
+        "objective_2": "emissions",
+        "method": "augmented_epsilon_constraint",
+        "points": 20,
+        "augmentation": 1e-6,
+    }
 )
 
-weighted = study.run(WeightedSumSweep(points=20, show_progress=True))
-epsilon = study.run(
-    AugmentedEpsilonConstraint(
-        points=20, augmentation=1e-6, show_progress=True
-    )
-)
-tchebycheff = study.run(
-    AugmentedTchebycheffSweep(
-        points=20, augmentation=1e-6, show_progress=True
-    )
-)
-
-tchebycheff.points       # one row per requested point
-tchebycheff.plot()       # interactive Plotly figure
-tchebycheff.solution(10) # complete Calliope result for point_id=10
+model.results.sel(pareto_point=10)  # complete Calliope result for point 10
+model.to_netcdf("pareto.nc")
+ParetoResult.from_dataset(model.results).plot()  # optional Plotly figure
 ```
 
-The model must contain both selected cost classes and the mutable
-`objective_cost_weights` input. The example supplies this input with an
-`override_dict` so both coordinates exist before the backend is built.
+Set `config.init.mode: multiobjective` and `config.solve.multiobjective` in the
+model YAML to use the same workflow from the CLI. `method` can be
+`weighted_sum`, `augmented_epsilon_constraint`, or `augmented_tchebycheff`.
+`model.results` contains a `pareto_point` dimension plus `pareto_objective_1`,
+`pareto_objective_2`, and the method parameters. Calliope prepares mutable
+`objective_cost_weights` for all cost classes when building this mode; no manual
+weight override is needed. Both selected cost classes must exist in the model.
 
 For a complete runnable comparison, see
 [`examples/three_method_pareto_front.ipynb`](examples/three_method_pareto_front.ipynb).
@@ -77,11 +57,15 @@ one figure.
 ## Architecture
 
 - `Objective` identifies a Calliope cost class and its display metadata.
-- `ParetoStudy` owns the model factory, the two objectives, and build/solve options.
-- A `ParetoMethod` builds a fresh model, calculates anchor solutions, and performs
-  its parameter sweep.
-- `ParetoResult` stores the point table and a deep copy of the complete Calliope
-  result for every point.
+- `Model.solve()` selects the method from the validated solve configuration and
+  runs it on the built backend.
+- A `ParetoMethod` calculates anchor solutions and performs its parameter sweep.
+- `ParetoResult` combines the complete solutions into `model.results` and offers
+  plotting from a saved or in-memory result.
+
+The earlier `ParetoStudy` interface remains available for existing scripts and
+for comparing several methods using fresh models. Its workflow now uses the same
+scalarisation implementations as the native mode.
 
 Every method first solves both objectives independently. These anchor solutions
 define the ideal values and payoff ranges used for normalisation. A small secondary

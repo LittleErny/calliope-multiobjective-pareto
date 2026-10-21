@@ -163,7 +163,10 @@ overrides:
 
   minimize_emissions_costs:
     data_definitions:
-      objective_cost_weights.data: { "emissions": 1, "monetary": 0 }
+      objective_cost_weights:
+        data: [0, 1]
+        index: [monetary, emissions]
+        dims: costs
     techs:
       ccgt:
         cost_flow_out:
@@ -177,6 +180,15 @@ overrides:
             - 10 # kgCO2/kWh
           index: [monetary, emissions]
           dims: costs
+
+  multiobjective:
+    config:
+      init.mode: multiobjective
+      solve.multiobjective:
+        objective_1: monetary
+        objective_2: emissions
+        method: weighted_sum
+        points: 3
 
   maximize_utility_costs:
     data_definitions:

@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import xarray as xr
+
 if TYPE_CHECKING:
     from calliope.model import Model
     from calliope.multiobjective.methods import ParetoMethod
@@ -32,6 +34,16 @@ class Objective:
 
 
 @dataclass
+class ParetoRun:
+    """A built model and the callback used for each scalar optimisation."""
+
+    model: Model
+    objective_1: Objective
+    objective_2: Objective
+    solve_one: Callable[[], xr.Dataset]
+
+
+@dataclass
 class ParetoStudy:
     """Coordinate repeated solves of one fresh Calliope model.
 
@@ -53,7 +65,15 @@ class ParetoStudy:
 
     def run(self, method: ParetoMethod) -> ParetoResult:
         """Run one Pareto-front generation method."""
-        return method.run(self)
+        model = self._new_built_model()
+
+        def solve_one() -> xr.Dataset:
+            model.solve(force=model.is_solved, **self.solve_options)
+            return model.results.copy(deep=True)
+
+        return method.run(
+            ParetoRun(model, self.objective_1, self.objective_2, solve_one)
+        )
 
     def _new_built_model(self) -> Model:
         """Create and, if necessary, build a clean model for one method."""

@@ -15,7 +15,7 @@ config:
     subset:
       timesteps: ["2005-01-01", "2005-01-05"] # Subset of timesteps
     broadcast_input_data: true  # allow single indexed parameter data entries to be broadcast across all index items, if there are multiple entries.
-    mode: base # Choices: base, operate, spores
+    mode: base # Choices: base, operate, spores, multiobjective
 
   build:
     ensure_feasibility: true # Switches on the "unmet demand" constraint

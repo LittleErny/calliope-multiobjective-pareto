@@ -20,10 +20,11 @@ from calliope.multiobjective.methods._common import (
     _validate_model,
 )
 from calliope.multiobjective.result import ParetoResult
+from calliope.schemas import math_schema
 
 if TYPE_CHECKING:
     from calliope.model import Model
-    from calliope.multiobjective.study import Objective, ParetoStudy
+    from calliope.multiobjective.study import Objective, ParetoRun
 
 
 @dataclass(frozen=True)
@@ -51,9 +52,9 @@ class AugmentedEpsilonConstraint(ParetoMethod):
         if not 0 < self.endpoint_tie_breaker < 1:
             raise ValueError("endpoint_tie_breaker must be between 0 and 1.")
 
-    def run(self, study: ParetoStudy) -> ParetoResult:
+    def run(self, study: ParetoRun) -> ParetoResult:
         """Generate efficient points over an automatic objective-2 epsilon grid."""
-        model = study._new_built_model()
+        model = study.model
         objectives = (study.objective_1, study.objective_2)
         costs = _validate_model(model, objectives)
         _report_progress(
@@ -98,8 +99,7 @@ class AugmentedEpsilonConstraint(ParetoMethod):
                     min=float(epsilon) / anchors.ranges[1],
                     max=float(epsilon) / anchors.ranges[1],
                 )
-                model.solve(force=True, **study.solve_options)
-                result = model.results.copy(deep=True)
+                result = study.solve_one()
 
             objective_1, objective_2 = _objective_values(result, objectives)
             rows.append(
@@ -143,40 +143,49 @@ class AugmentedEpsilonConstraint(ParetoMethod):
 
         model.backend.add_variable(
             self._EPSILON_VARIABLE,
-            {
-                "bounds": {"min": normalized_epsilon, "max": normalized_epsilon},
-                "default": normalized_epsilon,
-            },
+            math_schema.Variable.model_validate(
+                {
+                    "bounds": {"min": normalized_epsilon, "max": normalized_epsilon},
+                    "default": normalized_epsilon,
+                }
+            ),
         )
         model.backend.add_variable(
-            self._SLACK_VARIABLE, {"bounds": {"min": 0, "max": np.inf}, "default": 0}
+            self._SLACK_VARIABLE,
+            math_schema.Variable.model_validate(
+                {"bounds": {"min": 0, "max": np.inf}, "default": 0}
+            ),
         )
         model.backend.add_constraint(
             self._CONSTRAINT,
-            {
-                "equations": [
-                    {
-                        "expression": (
-                            f"{constrained} / {constrained_range!r} + "
-                            f"{self._SLACK_VARIABLE} "
-                            f"== {self._EPSILON_VARIABLE}"
-                        )
-                    }
-                ]
-            },
+            math_schema.Constraint.model_validate(
+                {
+                    "equations": [
+                        {
+                            "expression": (
+                                f"{constrained} / {constrained_range!r} + "
+                                f"{self._SLACK_VARIABLE} "
+                                f"== {self._EPSILON_VARIABLE}"
+                            )
+                        }
+                    ]
+                }
+            ),
         )
         model.backend.add_objective(
             self._OBJECTIVE,
-            {
-                "equations": [
-                    {
-                        "expression": (
-                            f"{primary} - {augmentation_coefficient!r} * "
-                            f"{self._SLACK_VARIABLE} + {_UNMET_DEMAND_PENALTY}"
-                        )
-                    }
-                ],
-                "sense": "minimise",
-            },
+            math_schema.Objective.model_validate(
+                {
+                    "equations": [
+                        {
+                            "expression": (
+                                f"{primary} - {augmentation_coefficient!r} * "
+                                f"{self._SLACK_VARIABLE} + {_UNMET_DEMAND_PENALTY}"
+                            )
+                        }
+                    ],
+                    "sense": "minimise",
+                }
+            ),
         )
         model.backend.set_objective(self._OBJECTIVE)

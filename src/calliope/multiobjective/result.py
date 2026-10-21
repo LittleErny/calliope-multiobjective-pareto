@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from numbers import Real
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pandas as pd
 import xarray as xr
 
-if TYPE_CHECKING:
-    from calliope.multiobjective.study import Objective
+from calliope.multiobjective.study import Objective
 
 
 @dataclass(frozen=True)
@@ -34,6 +33,61 @@ class ParetoResult:
             raise KeyError(f"Unknown Pareto point_id: {point_id}")
         position = matches[0]
         return self.solutions[position]
+
+    def to_dataset(self) -> xr.Dataset:
+        """Combine complete solutions and sweep metadata as Calliope results."""
+        point_ids = pd.Index(self.points["point_id"].to_numpy(), name="pareto_point")
+        results = xr.concat(self.solutions, dim=point_ids, combine_attrs="drop")
+        for column in self.points.columns:
+            if column == "point_id":
+                continue
+            results[f"pareto_{column}"] = xr.DataArray(
+                self.points[column].to_numpy(),
+                coords={"pareto_point": point_ids},
+                dims="pareto_point",
+            )
+        conditions = [
+            solution.attrs.get("termination_condition", "")
+            for solution in self.solutions
+        ]
+        if all(condition in {"optimal", "feasible"} for condition in conditions):
+            results.attrs["termination_condition"] = (
+                "feasible" if "feasible" in conditions else "optimal"
+            )
+        results.attrs.update(
+            pareto_method=self.method,
+            pareto_objective_1=self.objective_1.cost_class,
+            pareto_objective_2=self.objective_2.cost_class,
+        )
+        return results
+
+    @classmethod
+    def from_dataset(cls, results: xr.Dataset) -> ParetoResult:
+        """Restore the plotting interface from native mode results."""
+        required = {"pareto_method", "pareto_objective_1", "pareto_objective_2"}
+        if "pareto_point" not in results.dims or not required <= results.attrs.keys():
+            raise ValueError("Dataset does not contain Calliope Pareto mode results.")
+        point_columns = {
+            name.removeprefix("pareto_"): results[name].values
+            for name in results.data_vars
+            if name.startswith("pareto_") and results[name].dims == ("pareto_point",)
+        }
+        points = pd.DataFrame(
+            {"point_id": results.pareto_point.values, **point_columns}
+        )
+        metadata_names = [f"pareto_{name}" for name in point_columns]
+        full_results = results.drop_vars(metadata_names)
+        solutions = tuple(
+            full_results.sel(pareto_point=point_id, drop=True)
+            for point_id in results.pareto_point.values
+        )
+        return cls(
+            method=results.attrs["pareto_method"],
+            objective_1=Objective(results.attrs["pareto_objective_1"]),
+            objective_2=Objective(results.attrs["pareto_objective_2"]),
+            points=points,
+            solutions=solutions,
+        )
 
     def plot(self, **plot_kwargs: Any) -> Any:
         """Plot the generated points with Plotly and return the figure.

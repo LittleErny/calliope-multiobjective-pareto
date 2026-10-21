@@ -21,7 +21,7 @@ from calliope.multiobjective.methods._common import (
 from calliope.multiobjective.result import ParetoResult
 
 if TYPE_CHECKING:
-    from calliope.multiobjective.study import ParetoStudy
+    from calliope.multiobjective.study import ParetoRun
 
 
 @dataclass(frozen=True)
@@ -41,9 +41,9 @@ class WeightedSumSweep(ParetoMethod):
         if not 0 < self.endpoint_tie_breaker < 1:
             raise ValueError("endpoint_tie_breaker must be between 0 and 1.")
 
-    def run(self, study: ParetoStudy) -> ParetoResult:
+    def run(self, study: ParetoRun) -> ParetoResult:
         """Build once, update objective weights, and solve for every weight."""
-        model = study._new_built_model()
+        model = study.model
         objectives = (study.objective_1, study.objective_2)
         costs = _validate_model(model, objectives)
         _report_progress(self.show_progress, "Weighted sum", None, self.points)

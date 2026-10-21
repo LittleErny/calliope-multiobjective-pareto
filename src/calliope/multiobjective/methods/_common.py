@@ -13,7 +13,7 @@ from calliope.multiobjective.result import ParetoResult
 
 if TYPE_CHECKING:
     from calliope.model import Model
-    from calliope.multiobjective.study import Objective, ParetoStudy
+    from calliope.multiobjective.study import Objective, ParetoRun
 
 
 class ParetoMethod(ABC):
@@ -22,7 +22,7 @@ class ParetoMethod(ABC):
     name: ClassVar[str]
 
     @abstractmethod
-    def run(self, study: ParetoStudy) -> ParetoResult:
+    def run(self, study: ParetoRun) -> ParetoResult:
         """Generate points for ``study``."""
 
 
@@ -50,7 +50,9 @@ def _report_progress(
     """Print one compact, in-place progress line for notebook runs."""
     if not enabled:
         return
-    status = "preparing anchor solutions" if completed is None else f"{completed}/{total}"
+    status = (
+        "preparing anchor solutions" if completed is None else f"{completed}/{total}"
+    )
     message = f"{label}: {status}"
     print(f"\r{message:<72}", end="\n" if completed == total else "", flush=True)
 
@@ -120,7 +122,7 @@ def _solve_weighted_objective(
     objectives: tuple[Objective, Objective],
     backend_weight_1: float,
     backend_weight_2: float,
-    study: ParetoStudy,
+    study: ParetoRun,
 ) -> xr.Dataset:
     """Solve one weighted objective while keeping its coefficients well scaled."""
     scale = max(abs(backend_weight_1), abs(backend_weight_2))
@@ -129,15 +131,14 @@ def _solve_weighted_objective(
     weights = _objective_weights(costs, objectives, backend_weight_1, backend_weight_2)
     model.backend.update_input("objective_cost_weights", weights)
     model.backend.set_objective("min_cost_optimisation")
-    model.solve(force=model.is_solved, **study.solve_options)
-    return model.results.copy(deep=True)
+    return study.solve_one()
 
 
 def _anchor_solutions(
     model: Model,
     costs: list,
     objectives: tuple[Objective, Objective],
-    study: ParetoStudy,
+    study: ParetoRun,
     normalization_tolerance: float,
     endpoint_tie_breaker: float,
 ) -> _AnchorSolutions:

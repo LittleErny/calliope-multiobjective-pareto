@@ -21,10 +21,11 @@ from calliope.multiobjective.methods._common import (
     _validate_model,
 )
 from calliope.multiobjective.result import ParetoResult
+from calliope.schemas import math_schema
 
 if TYPE_CHECKING:
     from calliope.model import Model
-    from calliope.multiobjective.study import Objective, ParetoStudy
+    from calliope.multiobjective.study import Objective, ParetoRun
 
 
 @dataclass(frozen=True)
@@ -52,14 +53,12 @@ class AugmentedTchebycheffSweep(ParetoMethod):
         if not 0 < self.endpoint_tie_breaker < 1:
             raise ValueError("endpoint_tie_breaker must be between 0 and 1.")
 
-    def run(self, study: ParetoStudy) -> ParetoResult:
+    def run(self, study: ParetoRun) -> ParetoResult:
         """Generate efficient points over a two-objective weight grid."""
-        model = study._new_built_model()
+        model = study.model
         objectives = (study.objective_1, study.objective_2)
         costs = _validate_model(model, objectives)
-        _report_progress(
-            self.show_progress, "Augmented Tchebycheff", None, self.points
-        )
+        _report_progress(self.show_progress, "Augmented Tchebycheff", None, self.points)
         anchors = _anchor_solutions(
             model,
             costs,
@@ -99,8 +98,7 @@ class AugmentedTchebycheffSweep(ParetoMethod):
                     costs, objectives, float(weight_1), float(weight_2)
                 )
                 model.backend.update_input("objective_cost_weights", weights)
-                model.solve(force=True, **study.solve_options)
-                result = model.results.copy(deep=True)
+                result = study.solve_one()
 
             objective_1, objective_2 = _objective_values(result, objectives)
             rows.append(
@@ -114,10 +112,7 @@ class AugmentedTchebycheffSweep(ParetoMethod):
             )
             solutions.append(result)
             _report_progress(
-                self.show_progress,
-                "Augmented Tchebycheff",
-                point_id + 1,
-                self.points,
+                self.show_progress, "Augmented Tchebycheff", point_id + 1, self.points
             )
 
         return ParetoResult(
@@ -145,40 +140,46 @@ class AugmentedTchebycheffSweep(ParetoMethod):
 
         model.backend.add_variable(
             self._AUXILIARY_VARIABLE,
-            {"bounds": {"min": 0, "max": np.inf}, "default": 0},
+            math_schema.Variable.model_validate(
+                {"bounds": {"min": 0, "max": np.inf}, "default": 0}
+            ),
         )
         for name, objective, expression in zip(
             (self._CONSTRAINT_1, self._CONSTRAINT_2), objectives, normalized
         ):
             model.backend.add_constraint(
                 name,
-                {
-                    "equations": [
-                        {
-                            "expression": (
-                                "objective_cost_weights"
-                                f"[costs={objective.cost_class}] * "
-                                f"{expression} <= {self._AUXILIARY_VARIABLE}"
-                            )
-                        }
-                    ]
-                },
+                math_schema.Constraint.model_validate(
+                    {
+                        "equations": [
+                            {
+                                "expression": (
+                                    "objective_cost_weights"
+                                    f"[costs={objective.cost_class}] * "
+                                    f"{expression} <= {self._AUXILIARY_VARIABLE}"
+                                )
+                            }
+                        ]
+                    }
+                ),
             )
 
         model.backend.add_objective(
             self._OBJECTIVE,
-            {
-                "equations": [
-                    {
-                        "expression": (
-                            f"{self._AUXILIARY_VARIABLE} + "
-                            f"{self.augmentation!r} * "
-                            f"({normalized[0]} + {normalized[1]}) + "
-                            f"{_UNMET_DEMAND_PENALTY}"
-                        )
-                    }
-                ],
-                "sense": "minimise",
-            },
+            math_schema.Objective.model_validate(
+                {
+                    "equations": [
+                        {
+                            "expression": (
+                                f"{self._AUXILIARY_VARIABLE} + "
+                                f"{self.augmentation!r} * "
+                                f"({normalized[0]} + {normalized[1]}) + "
+                                f"{_UNMET_DEMAND_PENALTY}"
+                            )
+                        }
+                    ],
+                    "sense": "minimise",
+                }
+            ),
         )
         model.backend.set_objective(self._OBJECTIVE)

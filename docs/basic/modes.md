@@ -5,17 +5,17 @@ By default, it is designed to find a system configuration with the lowest combin
 This is a method that is known as "perfect foresight" optimisation.
 We refer to it in our model as [`base` mode](#base-mode).
 
-* **Base math**, defined in `config.init.base_math`, is _always_ applied to any Calliope problem.
-* **Mode math**, activated via `config.build.mode`, is reserved for special cases that require additional processing within Calliope.
-This includes [operate](#operate-mode) and [spores](#spores-mode) modes.
-* **Extra math**, activated via `config.build.extra_math`, is for additional formulations that can be _optionally_ loaded on top of the base math.
+* **Base math** is _always_ applied to any Calliope problem.
+* **Mode math**, activated via `config.init.mode`, is reserved for special cases that require additional processing within Calliope.
+This includes [operate](#operate-mode), [SPORES](#spores-mode), and [multiobjective](#multiobjective-mode) modes.
+* **Extra math**, activated via `config.init.extra_math`, is for additional formulations that can be _optionally_ loaded on top of the base math.
 
 !!! note
 
     The `base` mode is called base because it is active by default.
     However, it is possible to heavily modify or even completely replace this built-in base math. See the documentation on [user-defined custom math](../user_defined_math/index.md) for more on this.
 
-In addition to perfect foresight optimisation, we have a [receding horizon "operate" optimisation mode](#operate-mode) and the ["SPORES" mode](#spores-mode) to generate alternative system configurations that are within a small deviation of the optimal cost that is computed in `base` mode. Read on to find out more about each of these run modes.
+In addition to perfect foresight optimisation, we have a [receding horizon "operate" optimisation mode](#operate-mode), the ["SPORES" mode](#spores-mode) to generate near-optimal alternatives, and a [multiobjective mode](#multiobjective-mode) to sample a two-cost-class Pareto front.
 
 To load optional pre-defined math on top of the base math, you can reference it by name in your model configuration.
 
@@ -24,7 +24,7 @@ To load optional pre-defined math on top of the base math, you can reference it 
 
     ```yaml
     config:
-    build:
+      init:
         extra_math: [storage_inter_cluster]
     ```
 
@@ -89,6 +89,31 @@ For this reason, `horizon` must always be equal to or larger than `window`.
 
 !!! warning
     You must define **all** your technology capacities as input parameters for the model to run successfully.
+
+### Multiobjective mode
+
+`multiobjective` mode samples a Pareto front between two cost classes using
+repeated solves of the same built model. It supports normalised weighted sums,
+augmented epsilon constraints, and augmented weighted Tchebycheff scalarisation.
+Define both cost classes in the model, then select the mode and sweep settings:
+
+```yaml
+config:
+  init:
+    mode: multiobjective
+  solve:
+    multiobjective:
+      objective_1: monetary
+      objective_2: emissions
+      method: augmented_epsilon_constraint
+      points: 20
+      augmentation: 1e-6
+```
+
+Run the model with the normal `build()` and `solve()` calls or the `calliope run`
+command. Each requested point is available in `model.results` along the
+`pareto_point` dimension. The dataset also stores both objective values and the
+weight or epsilon used at each point. It can be saved with `model.to_netcdf()`.
 
 ### SPORES mode
 
