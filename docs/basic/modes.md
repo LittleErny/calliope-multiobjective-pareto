@@ -61,10 +61,8 @@ In Calliope, we define interest rate and loan period using the parameters `cost_
 In `operate` mode, all capacity constraints are fixed and the system is operated with a receding horizon control algorithm.
 This is sometimes known as a `dispatch` model - we're only concerned with the _dispatch_ of technologies whose capacities are already fixed.
 
-There are two main reasons to run in `operate` mode:
-
-1. You can assess how well your system performs when it doesn't have perfect foresight over the entire time period.
-Are your storage devices used appropriately when
+Use `operate` mode to assess how a system performs without perfect foresight over
+the entire time period, including how its storage devices are dispatched.
 
 To specify a valid `operate` mode model, capacities for all technologies at all locations must be defined.
 This can be done by specifying `flow_cap`, `storage_cap`, `area_use`, `source_cap`, and `purchased_units` as _input parameters_.
@@ -114,6 +112,9 @@ Run the model with the normal `build()` and `solve()` calls or the `calliope run
 command. Each requested point is available in `model.results` along the
 `pareto_point` dimension. The dataset also stores both objective values and the
 weight or epsilon used at each point. It can be saved with `model.to_netcdf()`.
+The requested points may include identical solutions; the mode does not filter
+duplicate or dominated points. For the full workflow and method formulations, see
+`src/calliope/multiobjective/README.md` in the repository.
 
 ### SPORES mode
 

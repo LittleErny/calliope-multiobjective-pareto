@@ -180,9 +180,7 @@ def test_augmented_epsilon_constraint(study):
 
 def test_augmented_epsilon_finds_unsupported_point():
     unsupported_study = ParetoStudy(
-        _UnsupportedFakeModel,
-        Objective("money"),
-        Objective("emissions"),
+        _UnsupportedFakeModel, Objective("money"), Objective("emissions")
     )
 
     weighted = unsupported_study.run(WeightedSumSweep(points=101))
@@ -232,10 +230,7 @@ def test_tchebycheff_objective_contains_augmentation():
     method = AugmentedTchebycheffSweep(augmentation=0.123)
 
     method._add_backend_components(
-        model,
-        objectives,
-        ideal_values=(1.0, 1.0),
-        ranges=(9.0, 9.0),
+        model, objectives, ideal_values=(1.0, 1.0), ranges=(9.0, 9.0)
     )
 
     expression = model.backend.objectives[method._OBJECTIVE]["equations"][0][

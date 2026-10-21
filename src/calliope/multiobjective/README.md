@@ -20,7 +20,7 @@ from pathlib import Path
 import calliope
 from calliope.multiobjective import ParetoResult
 
-MODEL_PATH = Path("path/to/model.yaml")
+MODEL_PATH = Path("src/calliope/multiobjective/examples/national_scale/model.yaml")
 model = calliope.read_yaml(
     MODEL_PATH, scenario="minimize_emissions_costs", mode="multiobjective"
 )
@@ -40,6 +40,10 @@ model.to_netcdf("pareto.nc")
 ParetoResult.from_dataset(model.results).plot()  # optional Plotly figure
 ```
 
+Run this example from the repository root with a Calliope solver installed.
+The bundled national-scale model has `monetary` and `emissions` cost classes in
+its `minimize_emissions_costs` scenario.
+
 Set `config.init.mode: multiobjective` and `config.solve.multiobjective` in the
 model YAML to use the same workflow from the CLI. `method` can be
 `weighted_sum`, `augmented_epsilon_constraint`, or `augmented_tchebycheff`.
@@ -47,6 +51,8 @@ model YAML to use the same workflow from the CLI. `method` can be
 `pareto_objective_2`, and the method parameters. Calliope prepares mutable
 `objective_cost_weights` for all cost classes when building this mode; no manual
 weight override is needed. Both selected cost classes must exist in the model.
+The requested points can coincide or be dominated; inspect the objective values
+before treating the result as a filtered Pareto frontier.
 
 For a complete runnable comparison, see
 [`examples/three_method_pareto_front.ipynb`](examples/three_method_pareto_front.ipynb).
